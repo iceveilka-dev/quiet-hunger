@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "C:\Users\kiril\OneDrive\Desktop\ИГра\island.py", line 1001, in run_game
+    _run_game()
+    ~~~~~~~~~^^
+  File "C:\Users\kiril\OneDrive\Desktop\ИГра\island.py", line 898, in _run_game
+    world = IslandWorld(screen)
+  File "C:\Users\kiril\OneDrive\Desktop\ИГра\island.py", line 375, in __init__
+    pygame.draw.polygon(self.decor, JUNGLE, inner)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: unable to interpret object of type '                                                                                                                            dict' as a color

@@ -1,12 +1,15 @@
-from island import run_game
-from audio import play_music
 import math
 import os
 import random
 import sys
-from island import run_game
+import webbrowser
+from island import run_game, has_save
 
 import pygame
+
+import audio
+import settings
+import ui
 
 W, H = 1600, 900
 SCALE = 4                      # эффекты рисуются в низком разрешении и растягиваются -> пиксель-арт стиль
@@ -30,6 +33,25 @@ WATER_ZONES = [
     pygame.Rect(0, 610, 85, 165),
     pygame.Rect(420, 610, 150, 70),
 ]
+
+DISCORD_URL = "https://discord.gg/n4Tqb5dSx"
+
+# Окна поверх меню: «О нас» и выбор «продолжить / новая игра»
+PANEL = pygame.Rect(0, 0, 680, 430)
+PANEL.center = (W // 2, H // 2)
+BACK_BTN = pygame.Rect(0, 0, 220, 52)
+BACK_BTN.midbottom = (PANEL.centerx, PANEL.bottom - 28)
+DISCORD_BTN = pygame.Rect(0, 0, 420, 62)
+DISCORD_BTN.center = (PANEL.centerx, PANEL.y + 255)
+
+PLAY_PANEL = pygame.Rect(0, 0, 560, 400)
+PLAY_PANEL.center = (W // 2, H // 2)
+CONT_BTN = pygame.Rect(0, 0, 380, 64)
+CONT_BTN.center = (PLAY_PANEL.centerx, PLAY_PANEL.y + 140)
+NEW_BTN = pygame.Rect(0, 0, 380, 64)
+NEW_BTN.center = (PLAY_PANEL.centerx, PLAY_PANEL.y + 228)
+PLAY_BACK = pygame.Rect(0, 0, 220, 52)
+PLAY_BACK.midbottom = (PLAY_PANEL.centerx, PLAY_PANEL.bottom - 24)
 
 SUN_POS = (793, 120)
 FIRE_POS = (1125, 685)
@@ -209,28 +231,80 @@ def draw_sparkles(layer, t):
                 layer.set_at((px + dx, py + dy), (255, 255, 235, a))
 
 
+def draw_about(screen, dim, fonts, notice):
+    mouse = pygame.mouse.get_pos()
+    screen.blit(dim, (0, 0))
+    ui.draw_frame(screen, PANEL, "ABOUT US", fonts)
+    ui.draw_text(screen, fonts["text"], "Quiet Hunger — survival on a tropical island.",
+                 (225, 225, 200), midtop=(PANEL.centerx, PANEL.y + 110))
+    ui.draw_text(screen, fonts["text"], "Join our Discord community:",
+                 (225, 225, 200), midtop=(PANEL.centerx, PANEL.y + 150))
+    ui.draw_button(screen, fonts["button"], DISCORD_BTN, "OPEN DISCORD", DISCORD_BTN.collidepoint(mouse),
+                   base=(70, 80, 160))
+    ui.draw_text(screen, fonts["small"], DISCORD_URL, (170, 185, 230),
+                 midtop=(PANEL.centerx, DISCORD_BTN.bottom + 14))
+    if notice > 0:
+        ui.draw_text(screen, fonts["small"], "Opening link in your browser...", (230, 210, 150),
+                     midtop=(PANEL.centerx, DISCORD_BTN.bottom + 44))
+    ui.draw_button(screen, fonts["button"], BACK_BTN, "BACK", BACK_BTN.collidepoint(mouse))
+
+
+def draw_play(screen, dim, fonts):
+    mouse = pygame.mouse.get_pos()
+    screen.blit(dim, (0, 0))
+    ui.draw_frame(screen, PLAY_PANEL, "PLAY", fonts)
+    saved = has_save()
+    ui.draw_button(screen, fonts["button"], CONT_BTN, "CONTINUE", CONT_BTN.collidepoint(mouse),
+                   base=(60, 110, 65), enabled=saved)
+    ui.draw_button(screen, fonts["button"], NEW_BTN, "NEW GAME", NEW_BTN.collidepoint(mouse))
+    if not saved:
+        ui.draw_text(screen, fonts["small"], "No saved game yet", (170, 170, 150),
+                     midtop=(PLAY_PANEL.centerx, CONT_BTN.bottom + 6))
+    ui.draw_button(screen, fonts["button"], PLAY_BACK, "BACK", PLAY_BACK.collidepoint(mouse))
+
+
+def start_game(load):
+    audio.play_music("game.ogg")
+    run_game(load=load)
+    audio.play_music("menu.ogg")      # вернулись в меню
+
+
 def activate(name):
+    """Возвращает название окна, которое нужно открыть поверх меню (или None)."""
     if name == "QUIT":
+        settings.save()
         pygame.quit()
         sys.exit()
 
     elif name == "PLAY":
-        print("Starting a new game...")
-        play_music("game.ogg")
-        run_game()
-        play_music("menu.ogg", volume=0.35)
+        if has_save():
+            return "play"                 # спросим: продолжить или новая игра
+        start_game(load=False)
+
+    elif name == "SETTINGS":
+        return "settings"
+
+    elif name == "ABOUT":
+        return "about"
 
     else:
         print(f"Нажата кнопка: {name}")
+    return None
 
 
 def main():
     pygame.init()
-    screen = pygame.display.set_mode((W, H), pygame.SCALED | pygame.RESIZABLE)
+    settings.load()
+    screen = pygame.display.set_mode((W, H), settings.display_flags())
     pygame.display.set_caption("Quiet Hunger")
     clock = pygame.time.Clock()
-    
-    play_music("menu.ogg", volume=0.35)
+    audio.play_music("menu.ogg")
+
+    fonts = ui.make_fonts()
+    dim = pygame.Surface((W, H), pygame.SRCALPHA)
+    dim.fill((0, 0, 0, 150))
+    settings_panel = ui.SettingsPanel((W // 2, H // 2))
+    panel, notice = None, 0.0
 
     bg = pygame.image.load(os.path.join(BASE, BG_FILE)).convert()
     if bg.get_size() != (W, H):
@@ -256,14 +330,47 @@ def main():
         dt = min(clock.tick(60) / 1000, 0.05)
         t += dt
         press_t = max(0.0, press_t - dt)
+        notice = max(0.0, notice - dt)
 
         # --- события ---
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
+                settings.save()
                 pygame.quit()
                 sys.exit()
-            elif e.type == pygame.KEYDOWN:
+            if e.type == pygame.KEYDOWN and e.key == pygame.K_F11:
+                settings.toggle_fullscreen()
+                continue
+
+            # --- открыто окно поверх меню ---
+            if panel:
+                if panel == "settings":
+                    if settings_panel.handle(e):
+                        panel = None
+                elif e.type == pygame.KEYDOWN:
+                    if e.key in (pygame.K_ESCAPE, pygame.K_BACKSPACE):
+                        panel = None
+                elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                    if panel == "about":
+                        if BACK_BTN.collidepoint(e.pos):
+                            panel = None
+                        elif DISCORD_BTN.collidepoint(e.pos):
+                            webbrowser.open(DISCORD_URL)
+                            notice = 2.5
+                    elif panel == "play":
+                        if PLAY_BACK.collidepoint(e.pos):
+                            panel = None
+                        elif CONT_BTN.collidepoint(e.pos) and has_save():
+                            panel = None
+                            start_game(load=True)
+                        elif NEW_BTN.collidepoint(e.pos):
+                            panel = None
+                            start_game(load=False)
+                continue
+
+            if e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_ESCAPE:
+                    settings.save()
                     pygame.quit()
                     sys.exit()
                 elif e.key in (pygame.K_DOWN, pygame.K_s):
@@ -272,7 +379,7 @@ def main():
                     selected = (selected - 1) % len(BUTTONS)
                 elif e.key in (pygame.K_RETURN, pygame.K_SPACE):
                     press_t = 0.18
-                    activate(BUTTONS[selected][0])
+                    panel = activate(BUTTONS[selected][0])
             elif e.type == pygame.MOUSEMOTION:
                 for i, (_, rect) in enumerate(BUTTONS):
                     if rect.collidepoint(e.pos):
@@ -282,10 +389,18 @@ def main():
                     if rect.collidepoint(e.pos):
                         selected = i
                         press_t = 0.18
-                        activate(name)
+                        panel = activate(name)
 
         # курсор-«рука» над кнопками
-        over = any(r.collidepoint(pygame.mouse.get_pos()) for _, r in BUTTONS)
+        mouse_pos = pygame.mouse.get_pos()
+        if panel == "settings":
+            over = settings_panel.hit_any(mouse_pos)
+        elif panel == "about":
+            over = DISCORD_BTN.collidepoint(mouse_pos) or BACK_BTN.collidepoint(mouse_pos)
+        elif panel == "play":
+            over = CONT_BTN.collidepoint(mouse_pos) or NEW_BTN.collidepoint(mouse_pos) or PLAY_BACK.collidepoint(mouse_pos)
+        else:
+            over = any(r.collidepoint(mouse_pos) for _, r in BUTTONS)
         if over != hand:
             hand = over
             try:
@@ -339,18 +454,26 @@ def main():
         pygame.transform.scale(layer, (W, H), big)
         screen.blit(big, (0, 0))
 
-        # подсветка выбранной кнопки
-        rect = BUTTONS[selected][1]
-        v = 18 + 12 * math.sin(t * 4) + 60 * (press_t / 0.18)
-        v = int(max(0, min(255, v)))
-        glow = pygame.Surface(rect.size)
-        glow.fill((v, v, v))
-        screen.blit(glow, rect.topleft, special_flags=pygame.BLEND_RGB_ADD)
+        # подсветка выбранной кнопки (пока открыто окно — не рисуем)
+        if not panel:
+            rect = BUTTONS[selected][1]
+            v = 18 + 12 * math.sin(t * 4) + 60 * (press_t / 0.18)
+            v = int(max(0, min(255, v)))
+            glow = pygame.Surface(rect.size)
+            glow.fill((v, v, v))
+            screen.blit(glow, rect.topleft, special_flags=pygame.BLEND_RGB_ADD)
 
         # плавное появление в начале
         if t < 1.2:
             fade.set_alpha(int(255 * (1 - t / 1.2)))
             screen.blit(fade, (0, 0))
+
+        if panel == "settings":
+            settings_panel.draw(screen, dim, fonts)
+        elif panel == "about":
+            draw_about(screen, dim, fonts, notice)
+        elif panel == "play":
+            draw_play(screen, dim, fonts)
 
         pygame.display.flip()
 
